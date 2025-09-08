@@ -1,158 +1,191 @@
---// Services
-local players = game:GetService('Players')
-local run_service = game:GetService('RunService')
-local teams = game:GetService('Teams')
-local camera = workspace.CurrentCamera
-local user_input = game:GetService('UserInputService')
+-- Raw Code With Torso-Priority, Head-Burst, and Visible FOV
 
---// Settings
-local ESP_Enabled = true
-local TeamCheck = true
-local LineColor = Color3.fromRGB(255, 0, 0) -- enemy hidden
-local VisibleColor = Color3.fromRGB(0, 255, 150) -- enemy visible
-local LineThickness = 2
-
---// ESP Cache
-local ESP_Objects = {}
-
---// Check if player is an ally (your original logic)
-local function is_ally(player)
-    if not player then
-        return false
-    end
-    local helmet = player:FindFirstChildWhichIsA('Folder')
-        and player
-            :FindFirstChildWhichIsA('Folder')
-            :FindFirstChildOfClass('MeshPart')
-    if not helmet then
-        return false
-    end
-
-    if helmet.BrickColor == BrickColor.new('Black') then
-        return teams.Phantoms == players.LocalPlayer.Team, teams.Phantoms
-    end
-
-    return teams.Ghosts == players.LocalPlayer.Team, teams.Ghosts
+if
+    not debug.getupvalues
+    or not debug.setstack
+    or not debug.getstack
+    or not getgc
+then
+    game:GetService('Players').LocalPlayer:Kick('Executor Is Not Supported!')
 end
 
---// Build skeleton graph using Motor6D (or Welds as fallback)
-local function build_skeleton(player)
-    local skeleton = {}
+-- // Services
+local Players = game:GetService('Players')
+local LocalPlayer = Players.LocalPlayer
+local CurrentCamera = game:GetService('Workspace').CurrentCamera
+local UserInputService = game:GetService('UserInputService')
+local RunService = game:GetService('RunService')
 
-    for _, obj in ipairs(player:GetDescendants()) do
-        if obj:IsA('Motor6D') or obj:IsA('Weld') then
-            local part0, part1 = obj.Part0, obj.Part1
-            if part0 and part1 then
-                table.insert(skeleton, { part0, part1 })
-            end
-        end
-    end
+-- // Settings
+local SilentAim = {
+    Enabled = true,
+    Fov = 45, -- FOV radius in pixels
+    TorsoShotsBeforeHead = 5, -- number of torso shots before head burst
+    HeadShotsBurst = 2, -- number of head shots in the burst
+}
 
-    return skeleton
-end
+-- Track hit part and countdowns
+local CurrentHitPart = 'Torso'
+local TorsoCountdown = SilentAim.TorsoShotsBeforeHead
+local HeadBurstRemaining = 0
 
---// Create ESP lines for each bone connection
-local function create_esp(player)
-    local skeleton = build_skeleton(player)
-    local lines = {}
+-- // Visible FOV Circle
+local FOVCircle = Drawing.new('Circle')
+FOVCircle.Visible = true
+FOVCircle.Color = Color3.new(1, 1, 1)
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 100
+FOVCircle.Radius = SilentAim.Fov
+FOVCircle.Filled = false
 
-    for _, pair in ipairs(skeleton) do
-        local line = Drawing.new('Line')
-        line.Thickness = LineThickness
-        line.Color = LineColor
-        line.Visible = false
-        table.insert(lines, { line = line, p0 = pair[1], p1 = pair[2] })
-    end
-
-    ESP_Objects[player] = lines
-end
-
---// Update ESP each frame
-local function update_esp()
-    for _, team in workspace.Players:GetChildren() do
-        for _, player in team:GetChildren() do
-            if player:IsA('Model') then
-                -- skip allies
-                if TeamCheck and is_ally(player) then
-                    if ESP_Objects[player] then
-                        for _, data in ipairs(ESP_Objects[player]) do
-                            data.line.Visible = false
-                        end
-                    end
-                    continue
-                end
-
-                -- create if missing
-                if not ESP_Objects[player] then
-                    create_esp(player)
-                end
-
-                local lines = ESP_Objects[player]
-                if not lines then
-                    continue
-                end
-
-                -- update skeleton
-                for _, data in ipairs(lines) do
-                    local part0, part1 = data.p0, data.p1
-                    if part0 and part1 then
-                        local pos0, on0 =
-                            camera:WorldToViewportPoint(part0.Position)
-                        local pos1, on1 =
-                            camera:WorldToViewportPoint(part1.Position)
-
-                        if on0 and on1 then
-                            -- visibility check
-                            local ray_origin = camera.CFrame.Position
-                            local ray_dir = (part0.Position - ray_origin)
-                            local hit = workspace:FindPartOnRayWithIgnoreList(
-                                Ray.new(ray_origin, ray_dir),
-                                { players.LocalPlayer.Character }
-                            )
-
-                            local visible = (hit == part0)
-
-                            data.line.From = Vector2.new(pos0.X, pos0.Y)
-                            data.line.To = Vector2.new(pos1.X, pos1.Y)
-                            data.line.Color = visible and VisibleColor
-                                or LineColor
-                            data.line.Visible = ESP_Enabled
-                        else
-                            data.line.Visible = false
-                        end
-                    else
-                        data.line.Visible = false
-                    end
-                end
-            end
-        end
-    end
-end
-
---// Cleanup ESP
-local function cleanup_esp()
-    for player, lines in pairs(ESP_Objects) do
-        if not player or not player.Parent then
-            for _, data in ipairs(lines) do
-                data.line:Remove()
-            end
-            ESP_Objects[player] = nil
-        end
-    end
-end
-
---// Main loop
-run_service.RenderStepped:Connect(function()
-    update_esp()
-    cleanup_esp()
+-- Update FOV circle every frame
+RunService.RenderStepped:Connect(function()
+    local mousePos = UserInputService:GetMouseLocation()
+    FOVCircle.Position = Vector2.new(mousePos.X, mousePos.Y)
 end)
 
---// Toggle ESP on/off
-user_input.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then
-        return
+-- // Modules
+local Modules = {}
+do
+    local Shared
+    for _, v in getgc(true) do
+        if
+            typeof(v) == 'table'
+            and rawget(v, 'require')
+            and not rawget(v, 'rawget')
+        then
+            Shared = v
+        end
     end
-    if input.KeyCode == Enum.KeyCode.Z then
-        ESP_Enabled = not ESP_Enabled
+
+    local Cache
+    xpcall(function()
+        Cache = debug.getupvalue(Shared.require, 1)._cache
+    end, function()
+        LocalPlayer:Kick(
+            'Make Sure The Game Is Loaded Or Check If You Have "FFlagDebugRunParallelLuaOnMainThread" "True".'
+        )
+    end)
+
+    local function Require(Module)
+        return Cache[Module].module
     end
-end)
+
+    Modules.ReplicationInterface = Require('ReplicationInterface')
+    Modules.BulletInterface = Require('BulletInterface')
+    Modules.PublicSettings = Require('PublicSettings')
+end
+
+if
+    not Modules.ReplicationInterface
+    or not Modules.BulletInterface
+    or not Modules.PublicSettings
+then
+    LocalPlayer:Kick('Failed To Get One Of The Modules. Try Rejoining.')
+end
+
+-- // Functions
+local Functions = {}
+do
+    -- Update hit part based on torso-priority + head-burst countdown
+    function Functions:UpdateHitPart()
+        if HeadBurstRemaining > 0 then
+            CurrentHitPart = 'Head'
+            HeadBurstRemaining = HeadBurstRemaining - 1
+        else
+            CurrentHitPart = 'Torso'
+            TorsoCountdown = TorsoCountdown - 1
+            if TorsoCountdown <= 0 then
+                HeadBurstRemaining = SilentAim.HeadShotsBurst
+                TorsoCountdown = SilentAim.TorsoShotsBeforeHead
+            end
+        end
+    end
+
+    -- Get closest player inside FOV
+    function Functions:GetClosestToMouse()
+        Functions:UpdateHitPart()
+        local Closest, HitPart = SilentAim.Fov, nil
+        local mousePos = UserInputService:GetMouseLocation()
+
+        Modules.ReplicationInterface.operateOnAllEntries(function(Player, Entry)
+            if
+                Player ~= LocalPlayer
+                and Entry._alive
+                and Player.Team ~= LocalPlayer.Team
+                and Entry._thirdPersonObject
+                and Entry._thirdPersonObject._characterModelHash
+            then
+                local HitBox =
+                    Entry._thirdPersonObject._characterModelHash[CurrentHitPart]
+                if HitBox then
+                    local ScreenPosition, OnScreen =
+                        CurrentCamera:WorldToViewportPoint(HitBox.Position)
+                    local Magnitude = (Vector2.new(
+                        ScreenPosition.X,
+                        ScreenPosition.Y
+                    ) - mousePos).Magnitude
+
+                    -- Only target if inside FOV circle
+                    if
+                        OnScreen
+                        and Magnitude <= SilentAim.Fov
+                        and Magnitude < Closest
+                    then
+                        Closest = Magnitude
+                        HitPart = HitBox
+                    end
+                end
+            end
+        end)
+
+        return HitPart
+    end
+
+    function Functions:CalCulateBulletDrop(To, From, MuzzleVelovity)
+        local Distance = (To - From).Magnitude
+        local Time = Distance / MuzzleVelovity
+        local Vertical = 0.5
+            * Modules.PublicSettings.bulletAcceleration
+            * Time ^ 2
+        return Vertical
+    end
+end
+
+-- // Hooks
+do
+    local OldBulletInterface = Modules.BulletInterface.newBullet
+    Modules.BulletInterface.newBullet = function(BulletData)
+        if BulletData.extra and SilentAim.Enabled then
+            local HitPart = Functions:GetClosestToMouse()
+            if HitPart then
+                local BulletSpeed =
+                    BulletData.extra.firearmObject:getWeaponStat('bulletspeed')
+                local VerticalDrop = Functions:CalCulateBulletDrop(
+                    HitPart.Position,
+                    BulletData.position,
+                    BulletSpeed
+                )
+                local LookVector = (
+                    HitPart.Position
+                    - VerticalDrop
+                    - BulletData.position
+                ).unit
+
+                for i, v in debug.getstack(2) do
+                    if
+                        typeof(v) == 'Vector3'
+                        and (BulletData.velocity.Unit - v).Magnitude < 0.1
+                    then
+                        debug.setstack(2, i, LookVector)
+                        break
+                    end
+                end
+
+                BulletData.velocity = LookVector * BulletSpeed
+            end
+        end
+
+        return OldBulletInterface(BulletData)
+    end
+end
