@@ -1,0 +1,116 @@
+-- Raw Code Without GUI
+
+if not debug.getupvalues or not debug.setstack or not debug.getstack or not getgc then -- Check If The Executor Is Supported 
+    game:GetService("Players").LocalPlayer:Kick("Executor Is Not Suported!");
+end;
+
+-- // Variables
+local Players = game:GetService("Players");
+local LocalPlayer = Players.LocalPlayer;
+local CurrentCamera = game:GetService("Workspace").CurrentCamera;
+local UserInputService = game:GetService("UserInputService");
+
+-- // Tables
+local SilentAim = { 
+    Enabled = true,
+    Fov = 130,
+    HitScan = "Head", -- Set to "Head" or "Torso" to choose the target part
+};
+
+-- // Modules 
+local Modules = { };
+do
+
+    local Shared;
+    for _,v in getgc(true) do 
+        if typeof(v) == "table" and rawget(v, "require") and not rawget(v, "rawget") then -- My Executors getinfo is broken :broken_heart: 
+            Shared = v; -- Gets The Shared table (Most Free Executors Don't Have getrenv().shared)
+        end;
+    end;
+
+    local Cache;
+    xpcall(function()
+        Cache = debug.getupvalue(Shared.require, 1)._cache;
+    end, function()
+        LocalPlayer:Kick('Make Sure The Game Is Loaded Or Check If You Have "FFlagDebugRunParallelLuaOnMainThread" "True".');
+    end)
+
+    local function Require(Module)
+        return Cache[Module].module;
+    end; 
+
+    Modules.ReplicationInterface = Require("ReplicationInterface");
+    Modules.BulletInterface = Require("BulletInterface");
+    Modules.PublicSettings = Require("PublicSettings");
+
+end;
+
+if not Modules.ReplicationInterface or not Modules.BulletInterface or not Modules.PublicSettings then
+    LocalPlayer:Kick('Failed To Get One Of The Modules. Try Rejoining.');
+end;
+
+-- // Functions
+local Functions = { };
+do
+    
+    function Functions:GetClosestToMouse() -- Quick Little Get Closest To Mouse Function Nothing Special.
+		local Closest, HitPart = SilentAim.Fov, nil;
+        
+		Modules.ReplicationInterface.operateOnAllEntries(function(Player, Entry)
+            if Player ~= LocalPlayer then
+				if Entry._alive and Player.Team ~= LocalPlayer.Team and Entry._thirdPersonObject and Entry._thirdPersonObject._characterModelHash then -- Check If They Are Alive And Have A Character
+					
+					local HitBox = Entry._thirdPersonObject._characterModelHash[SilentAim.HitScan];
+					if HitBox then
+						local ScreenPosition, OnScreen = CurrentCamera:WorldToViewportPoint(HitBox.Position); -- 3D To 2D
+						local Magnitude = (UserInputService:GetMouseLocation() - Vector2.new(ScreenPosition.X, ScreenPosition.Y)).Magnitude; -- The Distance Between Mouse And Player 2D Position.
+						if OnScreen and Magnitude < Closest then
+							Closest = Magnitude;
+							HitPart = HitBox;
+						end;
+					end;
+				end;
+			end;
+		end);
+
+		return HitPart;
+    end;
+
+    function Functions:CalCulateBulletDrop(To, From, MuzzleVelovity) -- I Have Added This As I Am Very Lazy On DELETEMOB V3(Sorry).
+        local Distance = (To - From).Magnitude;
+        local Time = Distance / MuzzleVelovity;
+        local Vertical = 0.5 * Modules.PublicSettings.bulletAcceleration * Time^2; -- kinematic Equation.
+        
+        return Vertical; -- How Much Need To Be Compinsated For Bullet Drop.
+    end;
+    
+end;
+
+-- // Hooks
+do
+    -- Thanks mickeydev For Showing Me How To Use SetStack.
+    local OldBulletInterface = Modules.BulletInterface.newBullet; Modules.BulletInterface.newBullet = function(BulletData) -- Hooks The New Bullets I Am Not Using hookfunction As It Can Cry About To Many Upvalues.
+
+        if BulletData.extra and SilentAim.Enabled then -- If LocalPlyer Is Sending It.
+            local HitPart = Functions:GetClosestToMouse();
+
+            if HitPart then
+                local BulletSpeed = BulletData.extra.firearmObject:getWeaponStat("bulletspeed");
+                local VerticalDrop = Functions:CalCulateBulletDrop(HitPart.Position, BulletData.position, BulletSpeed);
+                local LookVector = (HitPart.Position - VerticalDrop - BulletData.position).unit;
+
+                for i, v in debug.getstack(2) do -- https://www.lua.org/pil/24.2.html
+                    if typeof(v) == "Vector3" and (BulletData.velocity.Unit - v).Magnitude < 0.1 then -- The Index Can Change.
+                        debug.setstack(2, i, LookVector); -- Changes A Local Variale, LookVector Inside The FirearmObject.
+                        break;
+                    end;
+                end;
+
+                BulletData.velocity = LookVector * BulletSpeed; -- Creates The Velocity.
+            end;
+        end;
+
+        return OldBulletInterface(BulletData); -- Return It To The Old Function With Our Changed Arguments.
+    end;
+
+end;
