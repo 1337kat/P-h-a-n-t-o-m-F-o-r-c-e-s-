@@ -1,0 +1,158 @@
+--// Services
+local players = game:GetService('Players')
+local run_service = game:GetService('RunService')
+local teams = game:GetService('Teams')
+local camera = workspace.CurrentCamera
+local user_input = game:GetService('UserInputService')
+
+--// Settings
+local ESP_Enabled = true
+local TeamCheck = true
+local LineColor = Color3.fromRGB(255, 0, 0) -- enemy hidden
+local VisibleColor = Color3.fromRGB(0, 255, 150) -- enemy visible
+local LineThickness = 2
+
+--// ESP Cache
+local ESP_Objects = {}
+
+--// Check if player is an ally (your original logic)
+local function is_ally(player)
+    if not player then
+        return false
+    end
+    local helmet = player:FindFirstChildWhichIsA('Folder')
+        and player
+            :FindFirstChildWhichIsA('Folder')
+            :FindFirstChildOfClass('MeshPart')
+    if not helmet then
+        return false
+    end
+
+    if helmet.BrickColor == BrickColor.new('Black') then
+        return teams.Phantoms == players.LocalPlayer.Team, teams.Phantoms
+    end
+
+    return teams.Ghosts == players.LocalPlayer.Team, teams.Ghosts
+end
+
+--// Build skeleton graph using Motor6D (or Welds as fallback)
+local function build_skeleton(player)
+    local skeleton = {}
+
+    for _, obj in ipairs(player:GetDescendants()) do
+        if obj:IsA('Motor6D') or obj:IsA('Weld') then
+            local part0, part1 = obj.Part0, obj.Part1
+            if part0 and part1 then
+                table.insert(skeleton, { part0, part1 })
+            end
+        end
+    end
+
+    return skeleton
+end
+
+--// Create ESP lines for each bone connection
+local function create_esp(player)
+    local skeleton = build_skeleton(player)
+    local lines = {}
+
+    for _, pair in ipairs(skeleton) do
+        local line = Drawing.new('Line')
+        line.Thickness = LineThickness
+        line.Color = LineColor
+        line.Visible = false
+        table.insert(lines, { line = line, p0 = pair[1], p1 = pair[2] })
+    end
+
+    ESP_Objects[player] = lines
+end
+
+--// Update ESP each frame
+local function update_esp()
+    for _, team in workspace.Players:GetChildren() do
+        for _, player in team:GetChildren() do
+            if player:IsA('Model') then
+                -- skip allies
+                if TeamCheck and is_ally(player) then
+                    if ESP_Objects[player] then
+                        for _, data in ipairs(ESP_Objects[player]) do
+                            data.line.Visible = false
+                        end
+                    end
+                    continue
+                end
+
+                -- create if missing
+                if not ESP_Objects[player] then
+                    create_esp(player)
+                end
+
+                local lines = ESP_Objects[player]
+                if not lines then
+                    continue
+                end
+
+                -- update skeleton
+                for _, data in ipairs(lines) do
+                    local part0, part1 = data.p0, data.p1
+                    if part0 and part1 then
+                        local pos0, on0 =
+                            camera:WorldToViewportPoint(part0.Position)
+                        local pos1, on1 =
+                            camera:WorldToViewportPoint(part1.Position)
+
+                        if on0 and on1 then
+                            -- visibility check
+                            local ray_origin = camera.CFrame.Position
+                            local ray_dir = (part0.Position - ray_origin)
+                            local hit = workspace:FindPartOnRayWithIgnoreList(
+                                Ray.new(ray_origin, ray_dir),
+                                { players.LocalPlayer.Character }
+                            )
+
+                            local visible = (hit == part0)
+
+                            data.line.From = Vector2.new(pos0.X, pos0.Y)
+                            data.line.To = Vector2.new(pos1.X, pos1.Y)
+                            data.line.Color = visible and VisibleColor
+                                or LineColor
+                            data.line.Visible = ESP_Enabled
+                        else
+                            data.line.Visible = false
+                        end
+                    else
+                        data.line.Visible = false
+                    end
+                end
+            end
+        end
+    end
+end
+
+--// Cleanup ESP
+local function cleanup_esp()
+    for player, lines in pairs(ESP_Objects) do
+        if not player or not player.Parent then
+            for _, data in ipairs(lines) do
+                data.line:Remove()
+            end
+            ESP_Objects[player] = nil
+        end
+    end
+end
+
+--// Main loop
+run_service.RenderStepped:Connect(function()
+    update_esp()
+    cleanup_esp()
+end)
+
+--// Toggle ESP on/off
+user_input.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
+    end
+    if input.KeyCode == Enum.KeyCode.Z then
+        ESP_Enabled = not ESP_Enabled
+    end
+end)
