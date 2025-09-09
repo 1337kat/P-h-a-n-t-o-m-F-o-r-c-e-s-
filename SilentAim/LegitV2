@@ -1,0 +1,192 @@
+-- Raw Code With Torso-Priority, Head-Burst, and Visible FOV (Nerfed Version)
+
+if
+    not debug.getupvalues
+    or not debug.setstack
+    or not debug.getstack
+    or not getgc
+then
+    game:GetService('Players').LocalPlayer:Kick('Executor Is Not Supported!')
+end
+
+-- // Services
+local Players = game:GetService('Players')
+local LocalPlayer = Players.LocalPlayer
+local CurrentCamera = game:GetService('Workspace').CurrentCamera
+local UserInputService = game:GetService('UserInputService')
+local RunService = game:GetService('RunService')
+
+-- // Settings
+local SilentAim = {
+    Enabled = true,
+    Fov = 28, -- FOV radius in pixels
+    TorsoShotsBeforeHead = 5, -- number of torso shots before head burst
+    HeadShotsBurst = 2, -- number of head shots in the burst (now randomized)
+}
+
+-- Track hit part and countdowns
+local CurrentHitPart = 'Torso'
+local TorsoCountdown = SilentAim.TorsoShotsBeforeHead
+local HeadBurstRemaining = 0
+
+-- // Visible FOV Circle
+local FOVCircle = Drawing.new('Circle')
+FOVCircle.Visible = true
+FOVCircle.Color = Color3.new(1, 1, 1)
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 100
+FOVCircle.Radius = SilentAim.Fov
+FOVCircle.Filled = false
+
+-- Update FOV circle every frame
+RunService.RenderStepped:Connect(function()
+    local mousePos = UserInputService:GetMouseLocation()
+    FOVCircle.Position = Vector2.new(mousePos.X, mousePos.Y)
+end)
+
+-- // Modules
+local Modules = {}
+do
+    local Shared
+    for _, v in getgc(true) do
+        if
+            typeof(v) == 'table'
+            and rawget(v, 'require')
+            and not rawget(v, 'rawget')
+        then
+            Shared = v
+        end
+    end
+
+    local Cache
+    xpcall(function()
+        Cache = debug.getupvalue(Shared.require, 1)._cache
+    end, function()
+        LocalPlayer:Kick(
+            'Make Sure The Game Is Loaded Or Check If You Have "FFlagDebugRunParallelLuaOnMainThread" "True".'
+        )
+    end)
+
+    local function Require(Module)
+        return Cache[Module].module
+    end
+
+    Modules.ReplicationInterface = Require('ReplicationInterface')
+    Modules.BulletInterface = Require('BulletInterface')
+    Modules.PublicSettings = Require('PublicSettings')
+end
+
+if
+    not Modules.ReplicationInterface
+    or not Modules.BulletInterface
+    or not Modules.PublicSettings
+then
+    LocalPlayer:Kick('Failed To Get One Of The Modules. Try Rejoining.')
+end
+
+-- Add small random offset so shots aren't perfect
+local function ApplyRandomOffset(pos)
+    local offset = Vector3.new(
+        math.random(-30, 30) / 100, -- ±0.3 studs
+        math.random(-30, 30) / 100,
+        math.random(-30, 30) / 100
+    )
+    return pos + offset
+end
+
+-- // Functions
+local Functions = {}
+do
+    -- Update hit part based on torso-priority + head-burst countdown
+    function Functions:UpdateHitPart()
+        if HeadBurstRemaining > 0 then
+            CurrentHitPart = 'Head'
+            HeadBurstRemaining = HeadBurstRemaining - 1
+        else
+            CurrentHitPart = 'Torso'
+            TorsoCountdown = TorsoCountdown - 1
+            if TorsoCountdown <= 0 then
+                -- Randomize headshots per burst
+                HeadBurstRemaining = math.random(1, SilentAim.HeadShotsBurst)
+                TorsoCountdown = SilentAim.TorsoShotsBeforeHead
+            end
+        end
+    end
+
+    -- Get closest player inside FOV
+    function Functions:GetClosestToMouse()
+        -- 15% chance to miss completely
+        if math.random() < 0.15 then
+            return nil
+        end
+
+        Functions:UpdateHitPart()
+        local Closest, HitPart = SilentAim.Fov, nil
+        local mousePos = UserInputService:GetMouseLocation()
+
+        Modules.ReplicationInterface.operateOnAllEntries(function(Player, Entry)
+            if
+                Player ~= LocalPlayer
+                and Entry._alive
+                and Player.Team ~= LocalPlayer.Team
+                and Entry._thirdPersonObject
+                and Entry._thirdPersonObject._characterModelHash
+            then
+                local HitBox = Entry._thirdPersonObject._characterModelHash[CurrentHitPart]
+                if HitBox then
+                    local TargetPos = ApplyRandomOffset(HitBox.Position)
+                    local ScreenPosition, OnScreen = CurrentCamera:WorldToViewportPoint(TargetPos)
+                    local Magnitude = (Vector2.new(ScreenPosition.X, ScreenPosition.Y) - mousePos).Magnitude
+
+                    -- Only target if inside FOV circle
+                    if OnScreen and Magnitude <= SilentAim.Fov and Magnitude < Closest then
+                        Closest = Magnitude
+                        HitPart = {Position = TargetPos}
+                    end
+                end
+            end
+        end)
+
+        return HitPart
+    end
+
+    function Functions:CalCulateBulletDrop(To, From, MuzzleVelovity)
+        local Distance = (To - From).Magnitude
+        local Time = Distance / MuzzleVelovity
+        local Vertical = 0.5 * Modules.PublicSettings.bulletAcceleration * Time ^ 2
+        return Vertical
+    end
+end
+
+-- // Hooks
+do
+    local OldBulletInterface = Modules.BulletInterface.newBullet
+    Modules.BulletInterface.newBullet = function(BulletData)
+        if BulletData.extra and SilentAim.Enabled then
+            local HitPart = Functions:GetClosestToMouse()
+            if HitPart then
+                local BulletSpeed = BulletData.extra.firearmObject:getWeaponStat('bulletspeed')
+                local VerticalDrop = Functions:CalCulateBulletDrop(
+                    HitPart.Position,
+                    BulletData.position,
+                    BulletSpeed
+                )
+                local LookVector = (HitPart.Position - VerticalDrop - BulletData.position).unit
+
+                for i, v in debug.getstack(2) do
+                    if
+                        typeof(v) == 'Vector3'
+                        and (BulletData.velocity.Unit - v).Magnitude < 0.1
+                    then
+                        debug.setstack(2, i, LookVector)
+                        break
+                    end
+                end
+
+                BulletData.velocity = LookVector * BulletSpeed
+            end
+        end
+
+        return OldBulletInterface(BulletData)
+    end
+end
