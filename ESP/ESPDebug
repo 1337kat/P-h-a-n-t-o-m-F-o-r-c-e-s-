@@ -1,0 +1,285 @@
+--// Services
+local players = game:GetService('Players')
+local run_service = game:GetService('RunService')
+local teams = game:GetService('Teams')
+local camera = workspace.CurrentCamera
+local user_input = game:GetService('UserInputService')
+
+--// Settings
+local ESP_Enabled = true
+local DEBUG_MODE = true -- show debug labels
+local TeamCheck = true
+local LineThickness = 2
+
+-- Debug color scheme
+local PartColors = {
+	Head = Color3.fromRGB(255, 255, 0), -- Yellow
+	Torso = Color3.fromRGB(0, 150, 255), -- Blue
+	Arm = Color3.fromRGB(0, 255, 0), -- Green
+	Leg = Color3.fromRGB(255, 0, 150), -- Pink
+	Other = Color3.fromRGB(200, 200, 200), -- Grey
+}
+
+print(
+	'[ESP Debug] Legend → Head=Yellow, Torso=Blue, Arm=Green, Leg=Pink, Other=Grey'
+)
+
+--// ESP Cache
+local ESP_Objects = {}
+
+-- classify by heuristics
+local function classify_part(part, torsoY, torsoSize)
+	if not part or not part:IsA('BasePart') then
+		return 'Other'
+	end
+
+	-- head: highest point
+	if part.Position.Y > torsoY + torsoSize.Y * 0.6 then
+		return 'Head'
+	end
+
+	-- legs: well below torso
+	if part.Position.Y < torsoY - torsoSize.Y * 0.6 then
+		return 'Leg'
+	end
+
+	-- arms: out to the sides, near torso height
+	if
+		math.abs(part.Position.X) > torsoSize.X * 0.6
+		or math.abs(part.Position.Z) > torsoSize.Z * 0.6
+	then
+		return 'Arm'
+	end
+
+	-- torso: largest part
+	return 'Torso'
+end
+
+-- Ally check
+local function is_ally(player)
+	if not player then
+		return false
+	end
+	local helmet = player:FindFirstChildWhichIsA('Folder')
+		and player
+			:FindFirstChildWhichIsA('Folder')
+			:FindFirstChildOfClass('MeshPart')
+	if not helmet then
+		return false
+	end
+
+	if helmet.BrickColor == BrickColor.new('Black') then
+		return teams.Phantoms == players.LocalPlayer.Team, teams.Phantoms
+	end
+	return teams.Ghosts == players.LocalPlayer.Team, teams.Ghosts
+end
+
+-- Build skeleton
+local function build_skeleton(player)
+	local skeleton = {}
+	for _, obj in ipairs(player:GetDescendants()) do
+		if
+			(obj:IsA('Motor6D') or obj:IsA('Weld'))
+			and obj.Part0
+			and obj.Part1
+		then
+			table.insert(skeleton, { obj.Part0, obj.Part1 })
+		end
+	end
+	return skeleton
+end
+
+-- Find torso candidate (largest part)
+local function find_torso(player)
+	local biggest, torso = 0, nil
+	for _, part in ipairs(player:GetDescendants()) do
+		if part:IsA('BasePart') then
+			local size = part.Size.Magnitude
+			if size > biggest then
+				biggest = size
+				torso = part
+			end
+		end
+	end
+	return torso
+end
+
+-- Create ESP
+local function create_esp(player)
+	local skeleton = build_skeleton(player)
+	local lines = {}
+
+	local torso = find_torso(player)
+	local torsoY, torsoSize = 0, Vector3.new(2, 2, 2)
+	if torso then
+		torsoY, torsoSize = torso.Position.Y, torso.Size
+	end
+
+	print('[ESP Debug] Skeleton for', player.Name)
+
+	for _, pair in ipairs(skeleton) do
+		local p0, p1 = pair[1], pair[2]
+		if p0:IsA('BasePart') and p1:IsA('BasePart') then
+			local type0 = classify_part(p0, torsoY, torsoSize)
+			local type1 = classify_part(p1, torsoY, torsoSize)
+
+			local color0 = PartColors[type0] or PartColors.Other
+			local color1 = PartColors[type1] or PartColors.Other
+
+			local lineA = Drawing.new('Line')
+			lineA.Thickness = LineThickness
+			lineA.Visible = false
+
+			local lineB = Drawing.new('Line')
+			lineB.Thickness = LineThickness
+			lineB.Visible = false
+
+			local text0, text1
+			if DEBUG_MODE then
+				text0 = Drawing.new('Text')
+				text0.Size = 13
+				text0.Center = true
+				text0.Color = color0
+				text0.Text = type0
+				text0.Visible = false
+
+				text1 = Drawing.new('Text')
+				text1.Size = 13
+				text1.Center = true
+				text1.Color = color1
+				text1.Text = type1
+				text1.Visible = false
+			end
+
+			table.insert(lines, {
+				lineA = lineA,
+				lineB = lineB,
+				p0 = p0,
+				p1 = p1,
+				c0 = color0,
+				c1 = color1,
+				label0 = text0,
+				label1 = text1,
+			})
+
+			print(string.format('  [%s] <-> [%s]', type0, type1))
+		end
+	end
+
+	ESP_Objects[player] = lines
+end
+
+-- Update ESP
+local function update_esp()
+	for _, team in ipairs(workspace.Players:GetChildren()) do
+		for _, player in ipairs(team:GetChildren()) do
+			if player:IsA('Model') then
+				if TeamCheck and is_ally(player) then
+					if ESP_Objects[player] then
+						for _, data in ipairs(ESP_Objects[player]) do
+							data.lineA.Visible = false
+							data.lineB.Visible = false
+							if data.label0 then
+								data.label0.Visible = false
+							end
+							if data.label1 then
+								data.label1.Visible = false
+							end
+						end
+					end
+					continue
+				end
+
+				if not ESP_Objects[player] then
+					create_esp(player)
+				end
+
+				local lines = ESP_Objects[player]
+				if not lines then
+					continue
+				end
+
+				for _, data in ipairs(lines) do
+					local part0, part1 = data.p0, data.p1
+					if part0 and part1 then
+						local pos0, on0 =
+							camera:WorldToViewportPoint(part0.Position)
+						local pos1, on1 =
+							camera:WorldToViewportPoint(part1.Position)
+
+						if on0 and on1 then
+							local mid = (pos0 + pos1) / 2
+
+							data.lineA.From = Vector2.new(pos0.X, pos0.Y)
+							data.lineA.To = Vector2.new(mid.X, mid.Y)
+							data.lineA.Color = data.c0
+							data.lineA.Visible = ESP_Enabled
+
+							data.lineB.From = Vector2.new(mid.X, mid.Y)
+							data.lineB.To = Vector2.new(pos1.X, pos1.Y)
+							data.lineB.Color = data.c1
+							data.lineB.Visible = ESP_Enabled
+
+							if DEBUG_MODE then
+								data.label0.Position =
+									Vector2.new(pos0.X, pos0.Y - 15)
+								data.label0.Visible = ESP_Enabled
+								data.label1.Position =
+									Vector2.new(pos1.X, pos1.Y - 15)
+								data.label1.Visible = ESP_Enabled
+							end
+						else
+							data.lineA.Visible = false
+							data.lineB.Visible = false
+							if data.label0 then
+								data.label0.Visible = false
+							end
+							if data.label1 then
+								data.label1.Visible = false
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Cleanup ESP
+local function cleanup_esp()
+	for player, lines in pairs(ESP_Objects) do
+		if not player or not player.Parent then
+			for _, data in ipairs(lines) do
+				data.lineA:Remove()
+				data.lineB:Remove()
+				if data.label0 then
+					data.label0:Remove()
+				end
+				if data.label1 then
+					data.label1:Remove()
+				end
+			end
+			ESP_Objects[player] = nil
+		end
+	end
+end
+
+-- Main loop
+run_service.RenderStepped:Connect(function()
+	update_esp()
+	cleanup_esp()
+end)
+
+-- Hotkeys
+user_input.InputBegan:Connect(function(input, gpe)
+	if gpe then
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.Z then
+		ESP_Enabled = not ESP_Enabled
+		print('[ESP] ESP Toggled:', ESP_Enabled)
+	elseif input.KeyCode == Enum.KeyCode.X then
+		DEBUG_MODE = not DEBUG_MODE
+		print('[ESP Debug] Debug Mode:', DEBUG_MODE)
+	end
+end)
