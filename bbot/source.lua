@@ -1,6 +1,6 @@
 --[[
 	Devlogs:
-	- Changed UI to BBOT V3 instead of Wapus
+	- Changed UI to BBot V2
     ~ New Discord Server ~
 
     [ https://discord.gg/tUEJZYvF9d ]
@@ -32,7 +32,7 @@ end
 LPH_JIT_MAX = LPH_NO_VIRTUALIZE
 
 local devMode = true
-local defaultUIName = 'BBOT V3' -- $$$
+local defaultUIName = 'BBot V2' -- $$$
 local folderName = 'Phantom Forces Cheat'
 local connectionList = {}
 local callbackList = {}
@@ -9488,7 +9488,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     if isfile(folderName .. '/theme.json') then
         local userThemeData =
             httpService:JSONDecode(readfile(folderName .. '/theme.json'))
-        title = (userThemeData.Title == 'BBOT' and 'BBOT.Shop')
+        title = (userThemeData.Title == 'BBot' and 'BBot.Shop')
             or userThemeData.Title
         bbot.theme = {
             accent = Color3.fromRGB(
@@ -10912,7 +10912,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
         stillGoing = false
 
         for _, drawingFolder in game:GetService('CoreGui'):GetChildren() do
-            if drawingFolder.Name == 'Drawing API By BBOT' then
+            if drawingFolder.Name == 'Drawing API By BBot' then
                 drawingFolder:Destroy()
             end
         end
