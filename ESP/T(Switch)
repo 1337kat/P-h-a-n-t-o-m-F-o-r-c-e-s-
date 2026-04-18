@@ -1,0 +1,158 @@
+local PlayersFolder = workspace:WaitForChild("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local teams = PlayersFolder:GetChildren()
+local TeamA = teams[1]
+local TeamB = teams[2]
+
+if not TeamA or not TeamB then
+    error("Need 2 team folders inside workspace.Players")
+end
+
+local teamACache = {}
+local teamBCache = {}
+
+local teamAAddedConn
+local teamARemovingConn
+local teamBAddedConn
+local teamBRemovingConn
+
+local HIGHLIGHT_COLOR = Color3.new(1, 0, 0)
+local HIGHLIGHT_TRANSPARENCY = 0.4
+
+local currentVisibleTeam = "A" -- A highlighted, B unhighlighted
+
+local function isValidModel(v)
+    return v and v:IsA("Model")
+end
+
+local function getHighlight(model)
+    return model:FindFirstChild("CachedESP")
+end
+
+local function applyHighlight(model)
+    if not model or not model.Parent then
+        return
+    end
+
+    local h = getHighlight(model)
+
+    if not h then
+        h = Instance.new("Highlight")
+        h.Name = "CachedESP"
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.Parent = model
+    end
+
+    h.FillColor = HIGHLIGHT_COLOR
+    h.FillTransparency = HIGHLIGHT_TRANSPARENCY
+    h.OutlineTransparency = 0
+end
+
+local function removeHighlight(model)
+    local h = getHighlight(model)
+    if h then
+        h:Destroy()
+    end
+end
+
+local function addToCache(model, cache)
+    if not isValidModel(model) then
+        return
+    end
+
+    if cache[model] then
+        return
+    end
+
+    cache[model] = true
+end
+
+local function removeFromCache(model, cache)
+    cache[model] = nil
+end
+
+local function populateTeam(teamFolder, cache)
+    for _, v in ipairs(teamFolder:GetDescendants()) do
+        if isValidModel(v) then
+            addToCache(v, cache)
+        end
+    end
+end
+
+local function applyCacheHighlights(cache)
+    for model in pairs(cache) do
+        if model and model.Parent then
+            applyHighlight(model)
+        end
+    end
+end
+
+local function removeCacheHighlights(cache)
+    for model in pairs(cache) do
+        if model and model.Parent then
+            removeHighlight(model)
+        end
+    end
+end
+
+local function refreshVisibleState()
+    if currentVisibleTeam == "A" then
+        applyCacheHighlights(teamACache)
+        removeCacheHighlights(teamBCache)
+    else
+        applyCacheHighlights(teamBCache)
+        removeCacheHighlights(teamACache)
+    end
+end
+
+local function hookTeam(teamFolder, cache, teamId)
+    local addedConn = teamFolder.DescendantAdded:Connect(function(v)
+        if isValidModel(v) then
+            addToCache(v, cache)
+
+            if currentVisibleTeam == teamId then
+                applyHighlight(v)
+            else
+                removeHighlight(v)
+            end
+        end
+    end)
+
+    local removingConn = teamFolder.DescendantRemoving:Connect(function(v)
+        if isValidModel(v) then
+            removeFromCache(v, cache)
+        end
+    end)
+
+    return addedConn, removingConn
+end
+
+populateTeam(TeamA, teamACache)
+populateTeam(TeamB, teamBCache)
+
+teamAAddedConn, teamARemovingConn = hookTeam(TeamA, teamACache, "A")
+teamBAddedConn, teamBRemovingConn = hookTeam(TeamB, teamBCache, "B")
+
+refreshVisibleState()
+
+local function switchVisibleTeam()
+    if currentVisibleTeam == "A" then
+        currentVisibleTeam = "B"
+    else
+        currentVisibleTeam = "A"
+    end
+
+    refreshVisibleState()
+    print("Now showing team " .. currentVisibleTeam)
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
+    end
+
+    if input.KeyCode == Enum.KeyCode.T then
+        switchVisibleTeam()
+    end
+end)
