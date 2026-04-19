@@ -25,7 +25,7 @@ local function createRealisticOutline(model, color)
     outlineContainer.Name = "OutlineEffect"
     outlineContainer.Parent = model
 
-    -- 1. 3D outline
+    -- 1. 3D outline (unchanged from your original)
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("BasePart") then
             local outlinePart = part:Clone()
@@ -47,20 +47,25 @@ local function createRealisticOutline(model, color)
         end
     end
 
-    -- 2. Hollow square ESP box
+    -- 2. Hollow square ESP box - PERFECTLY SHAPED AROUND THE MODEL
+    local size = model:GetExtentsSize()
+    local boxWidth = math.max(size.X, size.Z) * 1.15   -- slight padding on width/depth
+    local boxHeight = size.Y * 1.30                    -- taller to nicely frame the full height
+
     local glowGui = Instance.new("BillboardGui")
     glowGui.Name = "GlowEffect"
     glowGui.AlwaysOnTop = true
-    glowGui.Size = UDim2.new(3, 0, 3, 0)
-    glowGui.StudsOffset = Vector3.new(0, 0, 0)
-    glowGui.Adornee = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+    glowGui.Size = UDim2.new(boxWidth, 0, boxHeight, 0)   -- scale = studs for world-size consistency
+    glowGui.StudsOffset = Vector3.new(0, boxHeight / 2 + 0.8, 0)  -- centered + lifted above feet
+    glowGui.Adornee = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+    glowGui.LightInfluence = 0
 
     local glowFrame = Instance.new("Frame")
     glowFrame.Size = UDim2.new(1, 0, 1, 0)
     glowFrame.BackgroundTransparency = 1
     glowFrame.Parent = glowGui
 
-    local border = 0.08
+    local border = 0.055  -- relative thickness (cleaner look)
 
     local function makeEdge(size, pos)
         local f = Instance.new("Frame")
@@ -72,14 +77,14 @@ local function createRealisticOutline(model, color)
         f.Parent = glowFrame
     end
 
-    makeEdge(UDim2.new(1, 0, border, 0), UDim2.new(0, 0, 0, 0)) -- top
-    makeEdge(UDim2.new(1, 0, border, 0), UDim2.new(0, 0, 1 - border, 0)) -- bottom
-    makeEdge(UDim2.new(border, 0, 1, 0), UDim2.new(0, 0, 0, 0)) -- left
-    makeEdge(UDim2.new(border, 0, 1, 0), UDim2.new(1 - border, 0, 0, 0)) -- right
+    makeEdge(UDim2.new(1, 0, border, 0), UDim2.new(0, 0, 0, 0))                    -- top
+    makeEdge(UDim2.new(1, 0, border, 0), UDim2.new(0, 0, 1 - border, 0))           -- bottom
+    makeEdge(UDim2.new(border, 0, 1, 0), UDim2.new(0, 0, 0, 0))                    -- left
+    makeEdge(UDim2.new(border, 0, 1, 0), UDim2.new(1 - border, 0, 0, 0))           -- right
 
     glowGui.Parent = outlineContainer
 
-    -- 3. Edge detection
+    -- 3. Edge detection (unchanged)
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("MeshPart") then
             local surfaceGui = Instance.new("SurfaceGui")
